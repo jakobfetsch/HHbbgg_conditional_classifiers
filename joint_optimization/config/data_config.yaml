@@ -1,0 +1,45 @@
+# Everything below is what dataset_prep.py actually reads (sample_to_class,
+# classes, weight_scheme_process, class_groups). The rest of the original
+# file - samples_info paths, systematics, save_all_columns_* - belongs to
+# the upstream skimming step that produces individual_samples/, not this
+# training pipeline, and was removed here; keep it in the skimming config
+# instead if you still need it there.
+
+sample_to_class: # processes and classes
+    GGJets: is_nonRes_bkg
+    DDQCDGJET: is_nonRes_bkg
+    TTGG: is_nonRes_bkg
+    ttHtoGG_M_125: is_Res_bkg
+    # BBHto2G_M_125: is_single_H_bkg  # not present in individual_samples/ on disk (any era)
+    GluGluHToGG_M_125: is_Res_bkg
+    VBFHToGG_M_125: is_Res_bkg
+    VHtoGG_M_125: is_Res_bkg
+    GluGlutoHHto2B2G_kl_1p00_kt_1p00_c2_0p00: is_ggHH_sig
+    VBFHH_CV_1p000_C2V_1p000_C3_1p000: is_VBFHH_sig  # treated as background, matching gato_categorization_vbf_only_ggh.py
+    # kl_0p00/kl_2p45/kl_5p00 GluGlutoHHto2B2G points: present on disk but intentionally
+    # left unmapped (only the nominal kl=1 point is used as the ggHH signal)
+
+classes: # all classes
+- is_nonRes_bkg
+- is_Res_bkg # single H
+- is_ggHH_sig
+- is_VBFHH_sig
+
+weight_scheme_process: # how to weight each process within a class
+    # xsec: weight by the cross-section of each process
+    # equal_weight: first weight each process to sum to 1, then renormalize the class to 1
+    is_nonRes_bkg: xsec
+    is_Res_bkg: xsec
+    is_ggHH_sig: xsec
+    is_VBFHH_sig: xsec
+
+# OPTIONAL: normalize a set of classes TOGETHER instead of each independently
+# (combined weight sums to 1, split by raw relative weight between members).
+# CONTRADICTS the sample_to_class comment above for VBFHH_CV_1p000_C2V_1p000_C3_1p000
+# (which groups VBFHH with is_Res_bkg, not is_VBFHH_sig) - verify which is intended
+# before relying on this; kept only because it reproduces a known reference number.
+# Remove this section (or pass data_prep.use_class_groups: false) to fall back to
+# fully independent per-class normalization.
+class_groups:
+  - classes: [is_ggHH_sig, is_VBFHH_sig]
+    scheme: xsec

@@ -1,0 +1,93 @@
+# Stage-A only. Produces a classifier_pretrained.weights.h5 that
+# combined_optimization_config.yaml's pretrained_classifier_weights_path
+# then points to.
+#
+# data_prep/class_weight_scheme must be copied identically into
+# combined_optimization_config.yaml (same values -> same seeds.data AND
+# seeds.data_split -> same reconstructed train/val/test split), so Stage B
+# starts from the exact rows the loaded classifier was pretrained on.
+#
+# CLASSIFIER (Stage A) PRESELECTION: data_prep.apply_classifier_preselection
+# below (default true if omitted) applies a FIXED mass/dijet-mass/mvaID
+# window - dataset_prep.classifier_preselection_mask, EXACTLY prepare_
+# inputs.py's preselection() - independently to train/val/test, before the
+# classifier weight (class_weights_for_set) computation. This is a
+# SEPARATE cut from the broader, fully config-driven 'preselection' section
+# (mass window, dijet-mass window, mvaID thresholds, is_boosted veto,
+# classifier-score cut) applied only in combined_optimization.py, via that
+# config's own 'preselection' section - see combined_optimization_config.yaml.
+# pretrain.py still ignores any top-level 'preselection' section here (there
+# is none below) - only data_prep.apply_classifier_preselection controls
+# Stage A's own cut.
+
+seeds:
+  data: 42           # era/sample fraction-sampling (which random --fraction subset is drawn)
+  data_split: 42     # OPTIONAL - train/val/test split of that pool, independent of `data`.
+                     # Omit (or set equal to `data`) for the old one-seed-does-both behavior.
+                     # Set differently from `data` to hold the SAME fraction-sampled event
+                     # pool fixed while varying only how it's split - see dataset_prep.
+                     # build_training_dataset's split_seed docstring.
+  classifier_init: 2026 # classifier weight initialization
+  shuffle: 23        # minibatch order during training
+
+cuda_device: "0"
+out-dir: "/net/data_cms3a-1/fetsch/HHbbgg_changed_workflow/single_model/3D_100_pretrain"
+plot_dtype: "png"
+
+data_prep:
+  data_config_path: "/net/data_cms3a-1/fetsch/HHbbgg_changed_workflow/single_model_3D/data_config.yaml"
+  fraction: 1.0
+  train_fraction: 0.7
+  val_fraction: 0.15
+  eras: null
+  use_class_groups: true
+  apply_classifier_preselection: true  # see the header comment above
+  random_search_dir: null
+
+class_weight_scheme: "weighted_abs"
+
+class_model:
+  num_layers: 5
+  num_nodes: 1024
+  act_fn_name: "ELU"
+  dropout_prob: 0.25
+
+pretrain_optimizer:
+  learning_rate: 2.027496582741043e-05
+  weight_decay: 5.159904717896079e-05
+
+pretrain:
+  epochs: 140
+  batch_size: 1024
+  early_stopping_patience: 50
+  checkpoint_every: 10
+  # tf.data shuffle buffer for the TRAIN split, per epoch - see
+  # training.make_memmap_dataset/_default_shuffle_buffer. null (default)
+  # means min(n_train, max(batch_size*50, 200_000)) - a BOUNDED buffer, not
+  # a full shuffle, if n_train exceeds that.
+  #
+  # This is much cheaper to raise than it looks: make_memmap_dataset never
+  # puts the actual feature rows into the shuffle buffer - it shuffles a
+  # plain tf.data.Dataset.range(n_train) of int64 ROW INDICES, and only
+  # fetches/materializes the (small) current batch's worth of actual rows
+  # from X_train (already fully in RAM at this point, via dataset_prep's
+  # np.concatenate - it does NOT stay memmapped through to here despite
+  # this function's name) afterward, per batch. So the shuffle buffer's own
+  # RAM cost is ~8 bytes/row (int64) - even shuffle_buffer == n_train
+  # (a perfect, full-dataset shuffle) only costs on the order of a few
+  # hundred MB for tens of millions of rows, essentially free next to
+  # X_train's own footprint (which is paid regardless of this setting).
+  # Set this to (at least) your train split's row count - see
+  # data_info.json's split_sizes["train_after_classifier_preselection"]
+  # (or split_sizes["train"] if apply_classifier_preselection is off) -
+  # for an exact full shuffle every epoch.
+  shuffle_buffer: null
+  scheduler:
+    mode: "min"
+    factor: 0.5
+    patience: 15
+    min_lr: 1.0e-06
+
+profiling:
+  enabled: true
+  device_sync: true

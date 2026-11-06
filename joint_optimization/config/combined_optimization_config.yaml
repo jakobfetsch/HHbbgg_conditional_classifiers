@@ -1,0 +1,184 @@
+# Stage-B only. Loads the classifier checkpoint from a pretrain.py run
+# (pretrained_classifier_weights_path) instead of training Stage A itself.
+#
+# data_prep/class_weight_scheme/preselection/seeds.data below must match
+# pretrain_config.yaml's values exactly, so this run reconstructs the same
+# train/val/test split the loaded classifier was pretrained on. This now
+# also includes data_prep.apply_classifier_preselection: the classifier
+# (Stage A) preselection - a fixed mass/dijet-mass/mvaID window, EXACTLY
+# prepare_inputs.py's preselection(), see dataset_prep.classifier_
+# preselection_mask - is reconstructed here FIRST, and the separate
+# 'preselection' section below (broader, fully config-driven: adds an
+# is_boosted veto and a classifier-score cut) composes ON TOP of it.
+
+seeds:
+  data: 42            # must match pretrain_config.yaml's seeds.data
+  data_split: 13 #42      # must match pretrain_config.yaml's seeds.data_split (OPTIONAL there -
+                       # if that config omitted it, omit it here too; either way both configs
+                       # must agree, same rule as `data` - see its comment)
+  classifier_init: 2026 # classifier is loaded from a checkpoint, so this only
+                       # affects the discarded pre-load initialization
+  gmm_init: 2026        # GMM categorizer's own random initialization,
+                       # independent of classifier_init - vary this alone to
+                       # try different GMM starting points
+  shuffle: 23          # row-order shuffle applied once before Stage B
+
+cuda_device: "0"
+out-dir: "/net/data_cms3a-1/fetsch/HHbbgg_changed_workflow/single_model_new_structure_class_preselection/output/combined_optimization/regularization_test_010_"
+plot_dtype: "png"
+plot_dim: 4
+
+pretrained_classifier_weights_path: "/net/data_cms3a-1/fetsch/HHbbgg_changed_workflow/single_model/3D_100_pretrain/classifier_pretrained.weights.h5"
+
+data_prep:
+  data_config_path: "/net/data_cms3a-1/fetsch/HHbbgg_changed_workflow/single_model_new_structure_class_preselection/data_config.yaml"
+  fraction: 1.0
+  train_fraction: 0.7
+  val_fraction: 0.15
+  eras: null
+  use_class_groups: true
+  apply_classifier_preselection: true  # must match pretrain_config.yaml - see header comment
+  random_search_dir: null
+
+class_weight_scheme: "weighted_abs"
+
+preselection:
+  enabled: true
+  mass_low: 100
+  mass_high: 180
+  dijet_mass:
+    enabled: true  # STEP 1 already applied this - see comment above
+    low: 70
+    high: 190
+  lead_mvaid:
+    enabled: true  # STEP 1 already applied this - see comment above
+    min: -0.7
+  sublead_mvaid:
+    enabled: true  # STEP 1 already applied this - see comment above
+    min: -0.7
+  is_boosted_veto:
+    enabled: true
+  # Classifier-score-based cut - needs a loaded classifier, so it only runs
+  # here (combined_optimization.py), never in pretrain.py. Matches
+  # gato_categorization_vbf_only_ggh.py's `scores[:, 3] < 0.774`: keeps
+  # events whose class_index softmax score is below "max" (and, if set,
+  # above "min" - both independently optional).
+  score_cut:
+    enabled: false
+    class_index: 3
+    min: null
+    max: 0.774
+
+class_model:
+  num_layers: 5
+  num_nodes: 1024
+  act_fn_name: "ELU"
+  dropout_prob: 0.25
+
+gato_model:
+  n-cats: 5
+  signal_class: 2
+  dim: 3
+  temperature_init: 0.3
+  temperature_final: 0.05
+  drop_last_softmax_class: true
+
+nonres_reweight:
+  enabled: true
+  nonres_bkg_class: 0
+  mass_sb_low: 100.0
+  mass_sb_high: 180.0
+  mass_sig_low: 120.0
+  mass_sig_high: 130.0
+  nbins: 10        # train-split sideband-fit bin count
+  nbins_val: 4   # set explicitly to override the ratio-of-split-sizes default (scaled_nbins_for_split), e.g. 5
+  nbins_test: 4  # same, for the test-split fit(s)
+  recompute_every: 50
+  default_factor: 0.062
+  track_val_fit: true
+  save_training_fit_diagnostics_csv: true
+  save_training_fit_plots: false
+
+discriminant_density_diagnostics:
+  enabled: true
+  recompute_every: 10
+  bins: 160
+  score_range: [0.0, 1.0]
+  max_events_per_class: 20000
+  chunk_size: null
+  output_csv_name: "discriminant_density_history.csv"
+  output_meta_name: "discriminant_density_meta.json"
+
+train_optimizer:
+  class_learning_rate: 2.027496582741043e-05
+  gato_learning_rate: 0.125
+
+# Resume a PREVIOUS Stage-B run instead of starting fresh from
+# pretrained_classifier_weights_path (leaves pretrain out of the picture
+# entirely - Stage A is not part of this script anymore).
+continue_training:
+  enabled: false
+  weights_path: ""
+  gato_checkpoint_dir: ""
+  continue_finetuning: false
+
+training:
+  n_epochs: 35
+  batch_size: 1024
+  chunk_size: 300000
+  diagnostics_every: 20
+  sequential_row_order: true
+
+  profiling:
+    enabled: true
+    device_sync: true
+
+  dropout_in_finetune: false
+  early_stopping_patience: 100
+
+  loss_split:
+    penalty_in_gato_loss: true
+    penalty_in_classifier_loss: false
+    significance_in_classifier_loss: false
+
+  update_schedule:
+    classifier_steps_per_epoch: 1
+    gato_steps_per_epoch: 1
+
+  ce_mode: "multiclass"
+  scheduler:
+    mode: "min"
+    factor: 0.5
+    patience: 15
+    min_lr: 1.0e-06
+
+  mass_window_weighting:
+    enabled: true
+    low: 120
+    high: 130
+    softness: 1.0e-8
+
+
+regularization:
+  low_bkg_penalty:
+    lam: 0.1
+    threshold: 10.0
+  high_bkg_uncertainty_penalty:
+    enabled: false
+    lam: 0.05
+    rel_threshold: 0.1
+  covariance_damping:
+    enabled: false
+    lam: 0.0
+
+evaluation:
+  enabled: true
+  mass_feature: "mass"
+  mass_window: [120, 130]
+  events_parquet_name: "events_boostedCat.parquet"
+  chunk_size: 2000
+  output_subdir: "evaluation"
+  classifier_weights_name: "classifier_finetuned.weights.h5"
+  gato_checkpoint_dir_name: "checkpoint"
+  classifier_weights_path: null
+  gato_checkpoint_dir_path: null
